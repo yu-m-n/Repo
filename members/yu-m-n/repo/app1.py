@@ -2,280 +2,294 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="반품 예측 대시보드", layout="wide")
+# -----------------------------
+# 기본 설정
+# -----------------------------
+st.set_page_config(
+    page_title="반품 예측 모델 결과 대시보드",
+    layout="wide"
+)
 
 plt.rcParams["font.family"] = "Malgun Gothic"
 plt.rcParams["axes.unicode_minus"] = False
 
+# -----------------------------
+# 모델 성능 결과 (직접 입력)
+# -----------------------------
+metrics_df = pd.DataFrame([
+    {"model": "Decision Tree", "accuracy": 0.5650, "f1": 0.4945, "roc_auc": 0.5882, "note": "기준 트리 모델"},
+    {"model": "XGBoost", "accuracy": 0.5658, "f1": 0.4999, "roc_auc": 0.5879, "note": "F1 최고"},
+    {"model": "LightGBM", "accuracy": 0.5673, "f1": 0.4915, "roc_auc": 0.5927, "note": "ROC-AUC 최고"},
+    {"model": "CatBoost", "accuracy": 0.5680, "f1": 0.4909, "roc_auc": 0.5926, "note": "Accuracy 최고"},
+    {"model": "Logistic Regression", "accuracy": 0.5656, "f1": 0.4853, "roc_auc": 0.5876, "note": "선형 기준 모델"},
+])
 
-@st.cache_data
-def load_data():
-    X_tr_unscaled = pd.read_csv("X_tr_unscaled.csv")
-    X_val_unscaled = pd.read_csv("X_val_unscaled.csv")
-    X_test_unscaled = pd.read_csv("X_test_unscaled.csv")
-    y_tr = pd.read_csv("y_tr.csv")
-    y_val = pd.read_csv("y_val.csv")
-    test_order_id = pd.read_csv("test_order_id.csv")
+# -----------------------------
+# 컬럼 정보
+# -----------------------------
+feature_groups = pd.DataFrame({
+    "변수 구분": ["고객 정보", "상품 정보", "이력 정보", "행동 정보", "디바이스", "배송", "결제"],
+    "사용 변수": [
+        "customer_age",
+        "product_price, discount_percent, product_rating, product_category_*",
+        "past_purchase_count, past_return_rate",
+        "session_length_minutes, num_product_views, used_coupon",
+        "device_type_desktop, device_type_mobile, device_type_tablet",
+        "delivery_delay_days, shipping_method_*",
+        "payment_method_*"
+    ]
+})
 
-    metrics = pd.DataFrame([
-        {"model": "LightGBM", "accuracy": 0.5673, "f1": 0.4915, "roc_auc": 0.5927, "note": "ROC-AUC 최고"},
-        {"model": "CatBoost", "accuracy": 0.5680, "f1": 0.4909, "roc_auc": 0.5926, "note": "Accuracy 최고"},
-        {"model": "XGBoost", "accuracy": 0.5658, "f1": 0.4999, "roc_auc": 0.5879, "note": "F1 최고"},
-        {"model": "Logistic Regression", "accuracy": 0.5656, "f1": 0.4853, "roc_auc": 0.5876, "note": "선형 기준 모델"},
-    ])
+columns_info = [
+    "customer_age",
+    "product_price",
+    "discount_percent",
+    "product_rating",
+    "past_purchase_count",
+    "past_return_rate",
+    "delivery_delay_days",
+    "session_length_minutes",
+    "num_product_views",
+    "used_coupon",
+    "device_type_desktop",
+    "device_type_mobile",
+    "device_type_tablet",
+    "product_category_beauty",
+    "product_category_clothing",
+    "product_category_electronics",
+    "product_category_home",
+    "product_category_sports",
+    "product_category_toys",
+    "shipping_method_express",
+    "shipping_method_same_day",
+    "shipping_method_standard",
+    "payment_method_apple_pay",
+    "payment_method_credit_card",
+    "payment_method_debit_card",
+    "payment_method_paypal",
+]
 
-    return X_tr_unscaled, X_val_unscaled, X_test_unscaled, y_tr, y_val, test_order_id, metrics
-
-
-def decode_onehot(df, prefix):
-    cols = [c for c in df.columns if c.startswith(prefix + "_")]
-    if not cols:
-        return pd.Series(["unknown"] * len(df), index=df.index)
-    return df[cols].idxmax(axis=1).str.replace(prefix + "_", "", regex=False)
-
-
-X_tr, X_val, X_test, y_tr, y_val, test_order_id, metrics_df = load_data()
-
+# -----------------------------
+# 최고 성능 모델 추출
+# -----------------------------
 best_auc = metrics_df.loc[metrics_df["roc_auc"].idxmax()]
 best_f1 = metrics_df.loc[metrics_df["f1"].idxmax()]
 best_acc = metrics_df.loc[metrics_df["accuracy"].idxmax()]
 
-st.title("반품 예측 프로젝트 대시보드")
-st.caption("실제 전처리 데이터셋과 실제 모델 성능 결과를 기반으로 구성한 대시보드")
+# -----------------------------
+# 제목
+# -----------------------------
+st.title("이커머스 반품 예측 모델 성능 대시보드")
+st.caption("Validation 결과를 기반으로 각 모델의 성능을 비교하고 운영 인사이트를 정리한 발표용 대시보드")
 
-# -------------------------------------------------
-# 사이드바
-# -------------------------------------------------
-st.sidebar.header("대시보드 설정")
-metric_choice = st.sidebar.selectbox(
-    "모델 비교 기준",
-    ["roc_auc", "f1", "accuracy"],
-    format_func=lambda x: {
-        "roc_auc": "ROC-AUC",
-        "f1": "F1 Score",
-        "accuracy": "Accuracy"
-    }[x],
-)
+# -----------------------------
+# KPI
+# -----------------------------
+st.subheader("핵심 성능 요약")
 
-# -------------------------------------------------
-# 상단 KPI
-# -------------------------------------------------
-k1, k2, k3, k4 = st.columns(4)
-k1.metric("Train 데이터 수", f"{len(X_tr):,}")
-k2.metric("Validation 데이터 수", f"{len(X_val):,}")
-k3.metric("Test 데이터 수", f"{len(X_test):,}")
-k4.metric("Validation 실제 반품률", f"{y_val['returned'].mean():.1%}")
+k1, k2, k3 = st.columns(3)
+k1.metric("최고 ROC-AUC 모델", best_auc["model"], f"{best_auc['roc_auc']:.4f}")
+k2.metric("최고 F1 모델", best_f1["model"], f"{best_f1['f1']:.4f}")
+k3.metric("최고 Accuracy 모델", best_acc["model"], f"{best_acc['accuracy']:.4f}")
 
 st.markdown("---")
 
-# -------------------------------------------------
-# 모델 성능 비교
-# -------------------------------------------------
-st.subheader("모델 성능 비교")
+# -----------------------------
+# 모델 성능 비교 표 + 차트
+# -----------------------------
+st.subheader("모델별 Validation 성능 비교")
 
 left, right = st.columns([1.2, 1])
 
 with left:
     st.dataframe(
-        metrics_df.sort_values(metric_choice, ascending=False),
-        width="stretch",
-        hide_index=True,
+        metrics_df.sort_values("roc_auc", ascending=False),
+        use_container_width=True,
+        hide_index=True
     )
 
 with right:
-    sorted_df = metrics_df.sort_values(metric_choice, ascending=False)
-    fig, ax = plt.subplots(figsize=(7, 4))
-    ax.bar(sorted_df["model"], sorted_df[metric_choice])
+    chart_metric = st.selectbox(
+        "비교 지표 선택",
+        ["accuracy", "f1", "roc_auc"],
+        format_func=lambda x: {
+            "accuracy": "Accuracy",
+            "f1": "F1 Score",
+            "roc_auc": "ROC-AUC"
+        }[x]
+    )
+
+    sorted_df = metrics_df.sort_values(chart_metric, ascending=False)
+
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax.bar(sorted_df["model"], sorted_df[chart_metric])
+    ax.set_title(f"모델별 {chart_metric.upper()} 비교")
     ax.set_xlabel("모델")
-    ax.set_ylabel(metric_choice.upper())
+    ax.set_ylabel(chart_metric.upper())
     plt.xticks(rotation=20)
     st.pyplot(fig)
-
-c1, c2, c3 = st.columns(3)
-c1.metric("최고 ROC-AUC", best_auc["model"], f"{best_auc['roc_auc']:.4f}")
-c2.metric("최고 F1", best_f1["model"], f"{best_f1['f1']:.4f}")
-c3.metric("최고 Accuracy", best_acc["model"], f"{best_acc['accuracy']:.4f}")
 
 st.info(
-    "운영형 관점에서는 ROC-AUC가 가장 높은 LightGBM을 대표 모델로 설명하고, "
-    "분류 균형 관점에서는 F1이 가장 높은 XGBoost를 함께 비교하는 방식이 자연스럽습니다."
+    "운영 관점에서는 ROC-AUC가 가장 높은 LightGBM을 대표 모델로 설명할 수 있고, "
+    "분류 균형 관점에서는 F1 Score가 가장 높은 XGBoost를 함께 비교하는 것이 적절합니다."
 )
 
 st.markdown("---")
 
-# -------------------------------------------------
-# Train / Validation 타깃 분포
-# -------------------------------------------------
-st.subheader("반품 타깃 분포")
+# -----------------------------
+# 지표별 상세 비교
+# -----------------------------
+st.subheader("지표별 상세 비교")
 
-dist1, dist2 = st.columns(2)
+m1, m2, m3 = st.columns(3)
 
-with dist1:
-    dist_df = pd.DataFrame({
-        "dataset": ["Train", "Validation"],
-        "return_rate": [y_tr["returned"].mean(), y_val["returned"].mean()]
-    })
-    fig, ax = plt.subplots(figsize=(6, 4))
-    ax.bar(dist_df["dataset"], dist_df["return_rate"])
-    ax.set_ylabel("반품률")
-    ax.set_title("Train / Validation 반품률")
+with m1:
+    fig, ax = plt.subplots(figsize=(5, 4))
+    ax.bar(metrics_df["model"], metrics_df["accuracy"])
+    ax.set_title("Accuracy 비교")
+    ax.set_ylabel("Accuracy")
+    plt.xticks(rotation=25)
     st.pyplot(fig)
 
-with dist2:
-    val_counts = y_val["returned"].value_counts().sort_index()
-    fig, ax = plt.subplots(figsize=(6, 4))
-    ax.bar(["0", "1"], val_counts.values)
-    ax.set_xlabel("returned")
-    ax.set_ylabel("건수")
-    ax.set_title("Validation 타깃 분포")
+with m2:
+    fig, ax = plt.subplots(figsize=(5, 4))
+    ax.bar(metrics_df["model"], metrics_df["f1"])
+    ax.set_title("F1 Score 비교")
+    ax.set_ylabel("F1")
+    plt.xticks(rotation=25)
     st.pyplot(fig)
 
-st.markdown("---")
-
-# -------------------------------------------------
-# Validation 실제 데이터 기반 분석
-# -------------------------------------------------
-st.subheader("Validation 실제 데이터 분석")
-
-val_df = X_val.copy()
-val_df["returned"] = y_val["returned"].values
-
-# 범주형 복원
-val_df["product_category_label"] = decode_onehot(val_df, "product_category")
-val_df["device_type_label"] = decode_onehot(val_df, "device_type")
-val_df["shipping_method_label"] = decode_onehot(val_df, "shipping_method")
-val_df["payment_method_label"] = decode_onehot(val_df, "payment_method")
-
-category_options = ["전체"] + sorted(val_df["product_category_label"].dropna().unique().tolist())
-selected_category = st.sidebar.selectbox("카테고리 필터", category_options)
-
-filtered_df = val_df.copy()
-if selected_category != "전체":
-    filtered_df = filtered_df[filtered_df["product_category_label"] == selected_category]
-
-v1, v2, v3, v4 = st.columns(4)
-v1.metric("분석 대상 주문 수", f"{len(filtered_df):,}")
-v2.metric("실제 반품률", f"{filtered_df['returned'].mean():.1%}")
-v3.metric("평균 할인율", f"{filtered_df['discount_percent'].mean():.1f}%")
-v4.metric("평균 배송지연일", f"{filtered_df['delivery_delay_days'].mean():.2f}")
-
-row1_col1, row1_col2 = st.columns(2)
-
-with row1_col1:
-    category_rate = (
-        filtered_df.groupby("product_category_label", as_index=False)["returned"]
-        .mean()
-        .sort_values("returned", ascending=False)
-    )
-    fig, ax = plt.subplots(figsize=(6, 4))
-    ax.bar(category_rate["product_category_label"], category_rate["returned"])
-    ax.set_title("카테고리별 실제 반품률")
-    ax.set_xlabel("카테고리")
-    ax.set_ylabel("반품률")
-    plt.xticks(rotation=20)
-    st.pyplot(fig)
-
-with row1_col2:
-    shipping_rate = (
-        filtered_df.groupby("shipping_method_label", as_index=False)["returned"]
-        .mean()
-        .sort_values("returned", ascending=False)
-    )
-    fig, ax = plt.subplots(figsize=(6, 4))
-    ax.bar(shipping_rate["shipping_method_label"], shipping_rate["returned"])
-    ax.set_title("배송방식별 실제 반품률")
-    ax.set_xlabel("배송방식")
-    ax.set_ylabel("반품률")
-    plt.xticks(rotation=20)
-    st.pyplot(fig)
-
-row2_col1, row2_col2 = st.columns(2)
-
-with row2_col1:
-    tmp = filtered_df.copy()
-    tmp["discount_bin"] = pd.cut(
-        tmp["discount_percent"],
-        bins=[-0.1, 10, 30, 50, 100],
-        labels=["0-10", "10-30", "30-50", "50+"]
-    )
-    discount_rate = tmp.groupby("discount_bin", as_index=False)["returned"].mean()
-    fig, ax = plt.subplots(figsize=(6, 4))
-    ax.bar(discount_rate["discount_bin"].astype(str), discount_rate["returned"])
-    ax.set_title("할인율 구간별 실제 반품률")
-    ax.set_xlabel("할인율 구간")
-    ax.set_ylabel("반품률")
-    st.pyplot(fig)
-
-with row2_col2:
-    delay_rate = (
-        filtered_df.groupby("delivery_delay_days", as_index=False)["returned"]
-        .mean()
-        .sort_values("delivery_delay_days")
-    )
-    fig, ax = plt.subplots(figsize=(6, 4))
-    ax.plot(delay_rate["delivery_delay_days"], delay_rate["returned"], marker="o")
-    ax.set_title("배송 지연일수별 실제 반품률")
-    ax.set_xlabel("배송 지연일수")
-    ax.set_ylabel("반품률")
+with m3:
+    fig, ax = plt.subplots(figsize=(5, 4))
+    ax.bar(metrics_df["model"], metrics_df["roc_auc"])
+    ax.set_title("ROC-AUC 비교")
+    ax.set_ylabel("ROC-AUC")
+    plt.xticks(rotation=25)
     st.pyplot(fig)
 
 st.markdown("---")
 
-# -------------------------------------------------
-# 운영 인사이트
-# -------------------------------------------------
-st.subheader("운영 인사이트")
+# -----------------------------
+# 모델별 해석
+# -----------------------------
+st.subheader("모델별 해석")
 
-insight_1 = filtered_df.loc[filtered_df["delivery_delay_days"] >= 2, "returned"].mean()
-insight_2 = filtered_df.loc[filtered_df["discount_percent"] >= 40, "returned"].mean()
-insight_3 = filtered_df.loc[filtered_df["past_return_rate"] >= 0.5, "returned"].mean()
-insight_4 = filtered_df.loc[filtered_df["used_coupon"] == 1, "returned"].mean()
+for _, row in metrics_df.iterrows():
+    st.markdown(
+        f"- **{row['model']}**: Accuracy **{row['accuracy']:.4f}**, "
+        f"F1 **{row['f1']:.4f}**, ROC-AUC **{row['roc_auc']:.4f}** "
+        f"→ {row['note']}"
+    )
 
-i1, i2 = st.columns(2)
+st.markdown("---")
 
-with i1:
-    st.markdown(f"""
-- 배송 지연 **2일 이상** 주문 실제 반품률: **{insight_1:.1%}**
-- 할인율 **40% 이상** 주문 실제 반품률: **{insight_2:.1%}**
+# -----------------------------
+# 사용 변수 구조
+# -----------------------------
+st.subheader("모델 입력 변수 구조")
+
+col1, col2 = st.columns([1, 1])
+
+with col1:
+    st.dataframe(feature_groups, use_container_width=True, hide_index=True)
+
+with col2:
+    st.markdown("### 전체 컬럼 목록")
+    st.code(", ".join(columns_info))
+
+st.markdown("---")
+
+# -----------------------------
+# 예상 주요 분석 포인트
+# -----------------------------
+st.subheader("예상 주요 분석 포인트")
+
+a1, a2 = st.columns(2)
+
+with a1:
+    st.markdown("""
+### 반품에 영향을 줄 가능성이 높은 변수
+- `delivery_delay_days`
+- `past_return_rate`
+- `discount_percent`
+- `product_price`
+- `product_category_*`
+- `used_coupon`
 """)
 
-with i2:
-    st.markdown(f"""
-- 과거 반품률 **0.5 이상 고객** 실제 반품률: **{insight_3:.1%}**
-- 쿠폰 사용 주문 실제 반품률: **{insight_4:.1%}**
+with a2:
+    st.markdown("""
+### 운영 관점에서 해석 가능한 포인트
+- 배송 지연이 반품 증가로 이어지는지
+- 고할인 상품에서 반품률이 높아지는지
+- 과거 반품 이력이 재반품 가능성을 높이는지
+- 특정 카테고리에 반품이 집중되는지
+- 쿠폰 사용 여부가 반품 행동과 관련 있는지
 """)
-
-st.warning(
-    "현재 업로드된 파일에는 test 예측 확률(pred_prob) 결과 파일이 없어서, "
-    "고위험 주문 우선관리 리스트는 아직 만들 수 없습니다. "
-    "팀원이 order_id + pred_prob 파일을 주면 마지막 섹션에 바로 추가할 수 있습니다."
-)
 
 st.markdown("---")
 
-# -------------------------------------------------
-# 데이터 미리보기
-# -------------------------------------------------
-st.subheader("Validation 데이터 미리보기")
+# -----------------------------
+# 차트 구성 제안
+# -----------------------------
+st.subheader("추가 시각화 구성 제안")
 
-preview_cols = [
-    c for c in [
-        "product_price",
-        "discount_percent",
-        "product_rating",
-        "past_return_rate",
-        "session_length_minutes",
-        "num_product_views",
-        "delivery_delay_days",
-        "used_coupon",
-        "product_category_label",
-        "device_type_label",
-        "shipping_method_label",
-        "payment_method_label",
-        "returned",
-    ] if c in filtered_df.columns
-]
+chart_plan = pd.DataFrame({
+    "차트명": [
+        "카테고리별 반품률",
+        "배송 지연일수별 반품률",
+        "할인율 구간별 반품률",
+        "과거 반품률 구간별 반품률",
+        "쿠폰 사용 여부별 반품률",
+        "예측 확률 분포",
+        "고위험 주문 비율",
+        "주요 영향 변수 TOP 10"
+    ],
+    "목적": [
+        "상품군별 반품 패턴 파악",
+        "배송 이슈와 반품의 관계 분석",
+        "프로모션과 반품의 관계 분석",
+        "고객 이력과 반품의 관계 분석",
+        "쿠폰 사용과 반품 행동 비교",
+        "고위험군 분포 파악",
+        "운영 우선관리 대상 식별",
+        "모델 설명력 강화"
+    ]
+})
 
-st.dataframe(filtered_df[preview_cols].head(30), width="stretch", hide_index=True)
+st.dataframe(chart_plan, use_container_width=True, hide_index=True)
 
-st.success("이 대시보드는 학습 없이, 실제 업로드된 데이터와 이미 계산된 성능 결과만 사용합니다.")
+st.markdown("---")
+
+# -----------------------------
+# 최종 결론
+# -----------------------------
+st.subheader("최종 결론")
+
+st.markdown(f"""
+- **Accuracy 기준 최고 모델**은 **{best_acc['model']} ({best_acc['accuracy']:.4f})** 입니다.
+- **F1 Score 기준 최고 모델**은 **{best_f1['model']} ({best_f1['f1']:.4f})** 입니다.
+- **ROC-AUC 기준 최고 모델**은 **{best_auc['model']} ({best_auc['roc_auc']:.4f})** 입니다.
+
+이번 프로젝트에서는 단순 정확도보다 **반품 여부를 얼마나 잘 구분해내는가**가 중요하므로,  
+**ROC-AUC가 가장 높은 LightGBM**을 대표 모델로 선정하는 것이 타당합니다.
+
+다만 실제 반품 고객을 놓치지 않는 관점에서는 **F1 Score가 가장 높은 XGBoost**도 함께 비교 대상으로 제시할 수 있습니다.
+""")
+
+st.markdown("---")
+
+# -----------------------------
+# 운영 전략 제안
+# -----------------------------
+st.subheader("운영 전략 제안")
+
+st.markdown("""
+- 배송 지연 가능성이 높은 주문군은 사전 관리 대상으로 설정합니다.
+- 과거 반품 이력이 높은 고객군은 구매 전 안내를 강화합니다.
+- 고할인 상품은 상세페이지와 기대치 관리를 보완합니다.
+- 반품률이 높은 카테고리는 리뷰, 옵션, 설명 정보 품질을 개선합니다.
+- 예측 확률 파일이 추가되면 고위험 주문 우선관리 리스트까지 확장할 수 있습니다.
+""")
+
+st.success("이 앱은 CSV 데이터셋 없이도 실행되는 발표용 버전입니다.")
