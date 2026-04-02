@@ -25,9 +25,6 @@ st.set_page_config(
     layout="wide"
 )
 
-plt.rcParams["font.family"] = "Malgun Gothic"
-plt.rcParams["axes.unicode_minus"] = False
-
 BASE_DIR = Path(__file__).resolve().parent
 
 
