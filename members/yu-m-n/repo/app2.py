@@ -3,6 +3,19 @@ from pathlib import Path
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
+
+BASE_DIR = Path(__file__).resolve().parent
+FONT_PATH = BASE_DIR / "fonts" / "NotoSansKR-VariableFont_wght.ttf"
+
+if FONT_PATH.exists():
+    fm.fontManager.addfont(str(FONT_PATH))
+    font_name = fm.FontProperties(fname=str(FONT_PATH)).get_name()
+    plt.rcParams["font.family"] = font_name
+else:
+    plt.rcParams["font.family"] = "sans-serif"
+
+plt.rcParams["axes.unicode_minus"] = False
 
 # -----------------------------
 # 기본 설정
